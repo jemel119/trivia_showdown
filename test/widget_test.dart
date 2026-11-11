@@ -1,30 +1,48 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:trivia_showdown/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const TriviaShowdownApp());
+  testWidgets('Retry recovers from a failed request', (tester) async {
+    var attempts = 0;
+    final client = MockClient((request) async {
+      expect(request.url.queryParameters['amount'], '5');
+      if (++attempts == 1) {
+        return http.Response('Unavailable', 503);
+      }
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+      return http.Response(
+        jsonEncode({
+          'response_code': 0,
+          'results': List.generate(
+            5,
+            (index) => {
+              'question': 'Question ${index + 1} &amp; answer',
+              'correct_answer': 'Mars',
+              'incorrect_answers': ['Venus', 'Jupiter', 'Mercury'],
+            },
+          ),
+        }),
+        200,
+      );
+    });
+    addTearDown(client.close);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    await tester.pumpWidget(TriviaShowdownApp(client: client));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.pumpAndSettle();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Server error: 503. Please try again.'), findsOneWidget);
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+
+    expect(attempts, 2);
+    expect(find.text('Question 1 of 5'), findsOneWidget);
+    expect(find.text('Question 1 & answer'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
   });
 }

@@ -8,13 +8,16 @@ void main() {
 }
 
 class TriviaShowdownApp extends StatelessWidget {
-  const TriviaShowdownApp({super.key});
+  const TriviaShowdownApp({super.key, this.client});
+
+  final http.Client? client;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'API-to-Cloud Trivia Showdown',
       theme: ThemeData(primarySwatch: Colors.deepOrange),
-      home: const TriviaShowdownScreen(),
+      home: TriviaShowdownScreen(client: client),
     );
   }
 }
@@ -46,7 +49,10 @@ class Question {
 }
 
 class TriviaShowdownScreen extends StatefulWidget {
-  const TriviaShowdownScreen({super.key});
+  const TriviaShowdownScreen({super.key, this.client});
+
+  final http.Client? client;
+
   @override
   State<TriviaShowdownScreen> createState() => _TriviaShowdownScreenState();
 }
@@ -74,15 +80,18 @@ class _TriviaShowdownScreenState extends State<TriviaShowdownScreen> {
       final uri = Uri.parse(
         'https://opentdb.com/api.php?amount=5&category=9&difficulty=easy&type=multiple',
       );
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await (widget.client?.get(uri) ?? http.get(uri)).timeout(
+        const Duration(seconds: 10),
+      );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['response_code'] == 0) {
           final results = data['results'] as List;
           if (!mounted || roundId != _roundId) return;
-          if (results.isEmpty) {
+          if (results.length != 5) {
             setState(() {
-              _error = 'No trivia questions were returned. Please try again.';
+              _error =
+                  'The API did not return five questions. Please try again.';
               _isLoading = false;
             });
             return;
@@ -102,14 +111,14 @@ class _TriviaShowdownScreenState extends State<TriviaShowdownScreen> {
       } else {
         if (!mounted || roundId != _roundId) return;
         setState(() {
-          _error = 'Server error: ${response.statusCode}';
+          _error = 'Server error: ${response.statusCode}. Please try again.';
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted || roundId != _roundId) return;
       setState(() {
-        _error = 'Connection failed: $e';
+        _error = 'Could not load trivia. Check your connection and try again.';
         _isLoading = false;
       });
     }
@@ -161,6 +170,8 @@ class _TriviaShowdownScreenState extends State<TriviaShowdownScreen> {
     _roundId++;
     setState(() {
       _isLoading = true;
+      _error = '';
+      _questions = [];
       _currentIndex = 0;
       _score = 0;
       _answered = false;
@@ -181,10 +192,20 @@ class _TriviaShowdownScreenState extends State<TriviaShowdownScreen> {
             ? const Center(child: CircularProgressIndicator())
             : _error.isNotEmpty
             ? Center(
-                child: Text(
-                  _error,
-                  style: const TextStyle(color: Colors.red, fontSize: 16),
-                  textAlign: TextAlign.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _error,
+                      style: const TextStyle(color: Colors.red, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: _restart,
+                      child: const Text('Retry'),
+                    ),
+                  ],
                 ),
               )
             : _currentIndex >= _questions.length
